@@ -44,7 +44,7 @@ impl From<Output> for u8 {
 }
 
 /// The status of an output.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub enum Status {
     /// The output should sink at the given level
@@ -64,6 +64,7 @@ impl Status {
     }
 }
 
+// TODO: convert this into TryFrom to leverage the Error::InvalidCode(u8) case
 impl From<Status> for u8 {
     fn from(value: Status) -> Self {
         match value {
@@ -82,6 +83,7 @@ impl From<u8> for Status {
         let code = value & 0x7F;
 
         match (sourcing, code) {
+            (true, 0) => Self::Disable,
             (false, 0) => Self::Disable,
             (true, c) => Self::Source(c),
             (false, c) => Self::Sink(c),
@@ -112,21 +114,24 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
     /// Set the current sink/source status and code of an output
     pub async fn set_status(&mut self, output: Output, status: Status) -> Result<(), I::Error> {
         trace!("set_status");
-        self.write_reg(output, status).await
+
+        let reg = output.into();
+        let value = status.into();
+
+        debug!("W @0x{:x}={:x}", reg, value);
+
+        self.i2c
+            .write(SLAVE_ADDRESS, &[reg, value])
+            .await
+            .map_err(Error::I2c)
     }
 
     /// Get the current sink/source status and code of an output
     pub async fn status(&mut self, output: Output) -> Result<Status, I::Error> {
         trace!("status");
-        self.read_reg(output).await.map(|v| v.into())
-    }
-
-    /// Read a register value.
-    async fn read_reg<R: Into<u8>>(&mut self, reg: R) -> Result<u8, I::Error> {
-        trace!("read_reg");
 
         let mut buf = [0x00];
-        let reg = reg.into();
+        let reg = output.into();
 
         self.i2c
             .write_read(SLAVE_ADDRESS, &[reg], &mut buf)
@@ -135,26 +140,7 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
 
         debug!("R @0x{:x}={:x}", reg, buf[0]);
 
-        Ok(buf[0])
-    }
-
-    /// Blindly write a single memory address with a fixed value.
-    async fn write_reg<R, V>(&mut self, reg: R, value: V) -> Result<(), I::Error>
-    where
-        R: Into<u8>,
-        V: Into<u8>,
-    {
-        trace!("write_reg");
-
-        let reg = reg.into();
-        let value = value.into();
-
-        debug!("W @0x{:x}={:x}", reg, value);
-
-        self.i2c
-            .write(SLAVE_ADDRESS, &[reg, value])
-            .await
-            .map_err(Error::I2c)
+        Ok(buf[0].into())
     }
 
     /// Return the underlying I2C device
@@ -201,5 +187,33 @@ mod test {
 
         let mut mock = ds4432.release();
         mock.done();
+    }
+
+    #[test]
+    fn status_to_code_conversion() {
+        assert_eq!(Status::Sink(42).code(), 0x2A);
+        assert_eq!(Status::Source(42).code(), 0x2A);
+        assert_eq!(Status::Disable.code(), 0x00);
+        assert_eq!(Status::Sink(0).code(), 0x00);
+        assert_eq!(Status::Source(0).code(), 0x00);
+        // assert_eq!(Status::Source(0xAA).code(), 0x2A);
+    }
+
+    #[test]
+    fn status_to_u8_conversion() {
+        assert_eq!(u8::try_from(Status::Sink(42)), Ok(0x2A));
+        assert_eq!(u8::try_from(Status::Source(42)), Ok(0xAA));
+        assert_eq!(u8::try_from(Status::Disable), Ok(0x00));
+        assert_eq!(u8::try_from(Status::Sink(0)), Ok(0x00));
+        assert_eq!(u8::try_from(Status::Source(0)), Ok(0x00));
+        assert_eq!(u8::try_from(Status::Sink(0xAA)), Err(0xAA));
+    }
+
+    #[test]
+    fn u8_to_status_conversion() {
+        assert_eq!(Status::from(0x2A), Status::Sink(42));
+        assert_eq!(Status::from(0xAA), Status::Source(42));
+        assert_eq!(Status::from(0x00), Status::Disable);
+        assert_eq!(Status::from(0x80), Status::Disable);
     }
 }

@@ -7,6 +7,6 @@ pub type Result<T, E> = core::result::Result<T, Error<E>>;
 pub enum Error<E> {
     /// I2C bus error.
     I2c(E),
-    /// The given level is too high
-    InvalidLevel(u8),
+    /// The given code is too high
+    InvalidCode(u8),
 }
