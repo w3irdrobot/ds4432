@@ -47,9 +47,9 @@ impl From<Output> for u8 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub enum Status {
-    /// The output should sink at the given level
+    /// The output should sink at the given code
     Sink(u8),
-    /// The output should source at the given level
+    /// The output should source at the given code
     Source(u8),
     /// The output is completely disabled
     Disable,
@@ -60,19 +60,6 @@ impl Status {
         match self {
             Self::Sink(c) | Self::Source(c) => *c,
             Self::Disable => 0,
-        }
-    }
-}
-
-// TODO: convert this into TryFrom to leverage the Error::InvalidCode(u8) case
-impl From<Status> for u8 {
-    fn from(value: Status) -> Self {
-        match value {
-            Status::Disable | Status::Sink(0) | Status::Source(0) => 0,
-            // ensures MSB is 0
-            Status::Sink(code) => code & 0x7F,
-            // ensures MSB is 1
-            Status::Source(code) => code | 0x80,
         }
     }
 }
@@ -116,7 +103,24 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
         trace!("set_status");
 
         let reg = output.into();
-        let value = status.into();
+        let value = match status {
+            Status::Disable | Status::Sink(0) | Status::Source(0) => 0,
+            Status::Sink(code) => {
+                if code > 127 {
+                    return Err(Error::InvalidCode(code));
+                } else {
+                    code
+                }
+            }
+            Status::Source(code) => {
+                if code > 127 {
+                    return Err(Error::InvalidCode(code));
+                } else {
+                    // ensures MSB is 1
+                    code | 0x80
+                }
+            }
+        };
 
         debug!("W @0x{:x}={:x}", reg, value);
 
@@ -165,7 +169,11 @@ mod test {
 
     #[test]
     fn can_get_output_1_status() {
-        let expectations = [i2c::Transaction::write_read(0x90, vec![0xF8], vec![0xAA])];
+        let expectations = [i2c::Transaction::write_read(
+            SLAVE_ADDRESS,
+            vec![Output::One as u8],
+            vec![0xAA],
+        )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::new(mock);
 
@@ -178,7 +186,10 @@ mod test {
 
     #[test]
     fn can_set_output_2_status() {
-        let expectations = [i2c::Transaction::write(0x90, vec![0xF9, 0x2A])];
+        let expectations = [i2c::Transaction::write(
+            SLAVE_ADDRESS,
+            vec![Output::Two as u8, 0x2A],
+        )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::new(mock);
 
@@ -196,17 +207,6 @@ mod test {
         assert_eq!(Status::Disable.code(), 0x00);
         assert_eq!(Status::Sink(0).code(), 0x00);
         assert_eq!(Status::Source(0).code(), 0x00);
-        // assert_eq!(Status::Source(0xAA).code(), 0x2A);
-    }
-
-    #[test]
-    fn status_to_u8_conversion() {
-        assert_eq!(u8::try_from(Status::Sink(42)), Ok(0x2A));
-        assert_eq!(u8::try_from(Status::Source(42)), Ok(0xAA));
-        assert_eq!(u8::try_from(Status::Disable), Ok(0x00));
-        assert_eq!(u8::try_from(Status::Sink(0)), Ok(0x00));
-        assert_eq!(u8::try_from(Status::Source(0)), Ok(0x00));
-        assert_eq!(u8::try_from(Status::Sink(0xAA)), Err(0xAA));
     }
 
     #[test]
