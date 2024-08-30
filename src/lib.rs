@@ -47,20 +47,30 @@ impl From<Output> for u8 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub enum Status {
-    /// The output should sink at the given code
-    Sink(u8),
-    /// The output should source at the given code
-    Source(u8),
     /// The output is completely disabled
     Disable,
+    /// The output sink at the given code
+    Sink(u8),
+    /// The output sink at the given current value
+    SinkMircoAmp(f32),
+    /// The output source at the given code
+    Source(u8),
+    /// The output source at the given current value
+    SourceMircoAmp(f32),
 }
 
 impl Status {
-    pub fn code(&self) -> u8 {
+    pub fn code(&self) -> Option<u8> {
         match self {
-            Self::Sink(c) | Self::Source(c) => *c,
-            Self::Disable => 0,
+            Self::Sink(c) | Self::Source(c) => Some(*c),
+            Self::Disable => Some(0),
+            _ => None,
         }
+    }
+
+    pub fn current_ua(&self, rfs_ohm: u32) -> Option<f32> {
+        self.code()
+            .map(|code| ((62_312.5 * code as f64) / (rfs_ohm as f64)) as f32)
     }
 }
 
@@ -85,6 +95,8 @@ impl From<u8> for Status {
 )]
 pub struct AsyncDS4432<I> {
     i2c: I,
+    rfs0_ohm: Option<u32>,
+    rfs1_ohm: Option<u32>,
 }
 
 #[maybe_async_cfg::maybe(
@@ -93,9 +105,25 @@ pub struct AsyncDS4432<I> {
 )]
 impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
     /// Create a new DS4432 using the given I2C implementation
-    pub async fn new(i2c: I) -> Self {
+    pub fn new(i2c: I) -> Self {
         trace!("new");
-        Self { i2c }
+        Self::with_rfs(i2c, None, None).unwrap()
+    }
+
+    /// Create a new DS4432 using the given I2C implementation and the optinal Rfs values
+    pub fn with_rfs(
+        i2c: I,
+        rfs0_ohm: Option<u32>,
+        rfs1_ohm: Option<u32>,
+    ) -> Result<Self, I::Error> {
+        if rfs0_ohm == Some(0) || rfs1_ohm == Some(0) {
+            return Err(Error::InvalidRfs);
+        }
+        Ok(Self {
+            i2c,
+            rfs0_ohm,
+            rfs1_ohm,
+        })
     }
 
     /// Set the current sink/source status and code of an output
@@ -119,6 +147,21 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
                     // ensures MSB is 1
                     code | 0x80
                 }
+            }
+            Status::SinkMircoAmp(current) => {
+                let rfs = match output {
+                    Output::One => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::Two => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+                };
+                ((current * (rfs as f32)) / 62_312.5) as u8
+            }
+            Status::SourceMircoAmp(current) => {
+                let rfs = match output {
+                    Output::One => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::Two => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+                };
+                // ensures MSB is 1
+                ((current * (rfs as f32)) / 62_312.5) as u8 | 0x80
             }
         };
 
@@ -144,7 +187,36 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
 
         debug!("R @0x{:x}={:x}", reg, buf[0]);
 
-        Ok(buf[0].into())
+        let mut status = buf[0].into();
+        match output {
+            Output::One => {
+                if let Some(rfs) = self.rfs0_ohm {
+                    status = match status {
+                        Status::Sink(code) => {
+                            Status::SinkMircoAmp(Status::Sink(code).current_ua(rfs).unwrap())
+                        }
+                        Status::Source(code) => {
+                            Status::SourceMircoAmp(Status::Source(code).current_ua(rfs).unwrap())
+                        }
+                        _ => status,
+                    }
+                }
+            }
+            Output::Two => {
+                if let Some(rfs) = self.rfs1_ohm {
+                    status = match status {
+                        Status::Sink(code) => {
+                            Status::SinkMircoAmp(Status::Sink(code).current_ua(rfs).unwrap())
+                        }
+                        Status::Source(code) => {
+                            Status::SourceMircoAmp(Status::Source(code).current_ua(rfs).unwrap())
+                        }
+                        _ => status,
+                    }
+                }
+            }
+        }
+        Ok(status)
     }
 
     /// Return the underlying I2C device
@@ -166,6 +238,35 @@ mod test {
     use super::*;
     use embedded_hal_mock::eh1::i2c;
     use std::vec;
+
+    #[test]
+    fn status_to_code_conversion() {
+        assert_eq!(Status::Sink(42).code(), Some(0x2A));
+        assert_eq!(Status::Source(42).code(), Some(0x2A));
+        assert_eq!(Status::Disable.code(), Some(0x00));
+        assert_eq!(Status::Sink(0).code(), Some(0x00));
+        assert_eq!(Status::Source(0).code(), Some(0x00));
+        assert_eq!(Status::SinkMircoAmp(42.0).code(), None);
+        assert_eq!(Status::SourceMircoAmp(42.0).code(), None);
+    }
+
+    #[test]
+    fn code_to_current_ua_conversion() {
+        // example from datasheet
+        assert_eq!(Status::Source(42).current_ua(80_000), Some(32.71406));
+        assert_eq!(Status::Sink(42).current_ua(80_000), Some(32.71406));
+        assert_eq!(Status::Disable.current_ua(1000), Some(0.0));
+        assert_eq!(Status::SourceMircoAmp(42.0).current_ua(80_000), None);
+        assert_eq!(Status::SinkMircoAmp(42.0).current_ua(80_000), None);
+    }
+
+    #[test]
+    fn u8_to_status_conversion() {
+        assert_eq!(Status::from(0x2A), Status::Sink(42));
+        assert_eq!(Status::from(0xAA), Status::Source(42));
+        assert_eq!(Status::from(0x00), Status::Disable);
+        assert_eq!(Status::from(0x80), Status::Disable);
+    }
 
     #[test]
     fn can_get_output_1_status() {
@@ -201,19 +302,37 @@ mod test {
     }
 
     #[test]
-    fn status_to_code_conversion() {
-        assert_eq!(Status::Sink(42).code(), 0x2A);
-        assert_eq!(Status::Source(42).code(), 0x2A);
-        assert_eq!(Status::Disable.code(), 0x00);
-        assert_eq!(Status::Sink(0).code(), 0x00);
-        assert_eq!(Status::Source(0).code(), 0x00);
+    fn can_get_output_1_status_current() {
+        let expectations = [i2c::Transaction::write_read(
+            SLAVE_ADDRESS,
+            vec![Output::One as u8],
+            vec![0xAA],
+        )];
+        let mock = i2c::Mock::new(&expectations);
+        let mut ds4432 = DS4432::with_rfs(mock, Some(80_000), None).unwrap();
+
+        let status = ds4432.status(Output::One).unwrap();
+        assert!(matches!(status, Status::SourceMircoAmp(32.71406)));
+
+        let mut mock = ds4432.release();
+        mock.done();
     }
 
     #[test]
-    fn u8_to_status_conversion() {
-        assert_eq!(Status::from(0x2A), Status::Sink(42));
-        assert_eq!(Status::from(0xAA), Status::Source(42));
-        assert_eq!(Status::from(0x00), Status::Disable);
-        assert_eq!(Status::from(0x80), Status::Disable);
+    fn can_set_output_2_status_current() {
+        let expectations = [i2c::Transaction::write(
+            SLAVE_ADDRESS,
+            vec![Output::Two as u8, 0x2A],
+        )];
+        let mock = i2c::Mock::new(&expectations);
+        let mut ds4432 = DS4432::with_rfs(mock, None, Some(80_000)).unwrap();
+
+        // just making sure it doesn't error
+        ds4432
+            .set_status(Output::Two, Status::SinkMircoAmp(32.71406))
+            .unwrap();
+
+        let mut mock = ds4432.release();
+        mock.done();
     }
 }

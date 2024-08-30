@@ -9,4 +9,8 @@ pub enum Error<E> {
     I2c(E),
     /// The given code is too high
     InvalidCode(u8),
+    /// The given RFS cannot be zero
+    InvalidRfs,
+    /// Try to set a Current value without giving the Rfs value
+    UnknownRfs,
 }
