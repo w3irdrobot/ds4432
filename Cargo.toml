@@ -1,26 +1,28 @@
 [package]
 authors = ["w3irdrobot <rob@w3ird.tech>"]
 categories = ["embedded", "hardware-support", "no-std"]
-description = "Platform-agnostic Rust driver for the Maxim DS4432 Dual-Channel, I^2C, 7-Bit Sink/Source Current Digital To Analog (DAC) converter."
+description = "Platform-agnostic Rust driver for the Maxim DS4432 Dual-Channel, I2C, 7-Bit Sink/Source Current Digital To Analog (DAC) converter."
 documentation = "https://docs.rs/ds4432"
 edition = "2021"
 keywords = ["no-std", "embedded-hal-driver", "dac"]
 license = " AGPL-3.0-only"
 name = "ds4432"
 repository = "https://github.com/w3irdrobot/ds4432"
-version = "0.1.0"
+rust-version = "1.71.1"
+version = "0.2.0"
 
 [dependencies]
-defmt = { version = "0.3.8", optional = true }
-embedded-hal = { version = "1.0.0", optional = true }
-embedded-hal-async = { version = "1.0.0", optional = true }
-maybe-async-cfg = "0.2.4"
+defmt = { version = "0.3", optional = true }
+embedded-hal = { version = "1.0" }
+embedded-hal-async = { version = "1.0", optional = true }
+log = { version = "0.4", optional = true }
+maybe-async-cfg = "0.2"
 
 [features]
 async = ["dep:embedded-hal-async"]
-blocking = ["dep:embedded-hal"]
-default = ["blocking"]
-defmt = ["dep:defmt"]
+default = ["sync"]
+defmt-03 = ["dep:defmt"]
+sync = []
 
 [dev-dependencies]
 embedded-hal-mock = { version = "0.11.1", default-features = false, features = [

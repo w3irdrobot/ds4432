@@ -1,4 +1,3 @@
-#![no_std]
 //! DS4432 driver.
 //!
 //! The DS4432 contains two I2C programmable current
@@ -11,22 +10,27 @@
 //! - [DS4432 product page](https://www.digikey.com/en/products/detail/analog-devices-inc-maxim-integrated/DS4432U-T-R/2062898)
 //! - [DS4432 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS4432.pdf)
 
-#[cfg(feature = "defmt")]
-use defmt::{debug, error, trace, Format};
+#![no_std]
+#![macro_use]
+pub(crate) mod fmt;
 
-#[cfg(all(feature = "blocking", feature = "async"))]
-compile_error!("feature \"blocking\" and feature \"async\" cannot be enabled at the same time");
+mod error;
+pub use error::{Error, Result};
 
-#[cfg(feature = "blocking")]
+#[cfg(any(feature = "async", feature = "sync"))]
+use embedded_hal::i2c::ErrorType;
+#[cfg(feature = "sync")]
 use embedded_hal::i2c::I2c;
 #[cfg(feature = "async")]
-use embedded_hal_async::i2c::I2c;
+use embedded_hal_async::i2c::I2c as AsyncI2c;
 
 /// The DS4432's I2C addresses.
+#[cfg(any(feature = "async", feature = "sync"))]
 const SLAVE_ADDRESS: u8 = 0x90;
 
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum Output {
     One = 0xF8,
@@ -39,17 +43,9 @@ impl From<Output> for u8 {
     }
 }
 
-/// Driver errors.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Error<E> {
-    /// I2C bus error.
-    I2c(E),
-    /// The given level is too high
-    InvalidLevel(u8),
-}
-
 /// The status of an output.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub enum Status {
     /// The output should sink at the given level
     Sink(u8),
@@ -94,43 +90,39 @@ impl From<u8> for Status {
 }
 
 /// A DS4432 Digital To Analog (DAC) converter on the I2C bus `I`.
-#[maybe_async_cfg::maybe(sync(feature = "blocking", keep_self), async(feature = "async"))]
-pub struct DS4432<I> {
+#[maybe_async_cfg::maybe(
+    sync(feature = "sync", self = "DS4432"),
+    async(feature = "async", keep_self)
+)]
+pub struct AsyncDS4432<I> {
     i2c: I,
 }
 
-#[maybe_async_cfg::maybe(sync(feature = "blocking", keep_self), async(feature = "async"))]
-impl<I, E> DS4432<I>
-where
-    I: I2c<Error = E>,
-{
+#[maybe_async_cfg::maybe(
+    sync(feature = "sync", self = "DS4432", idents(AsyncI2c(sync = "I2c"))),
+    async(feature = "async", keep_self)
+)]
+impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
     /// Create a new DS4432 using the given I2C implementation
     pub async fn new(i2c: I) -> Self {
-        #[cfg(feature = "defmt")]
         trace!("new");
-
         Self { i2c }
     }
 
     /// Set the current sink/source status and code of an output
-    pub async fn set_status(&mut self, output: Output, status: Status) -> Result<(), Error<E>> {
-        #[cfg(feature = "defmt")]
+    pub async fn set_status(&mut self, output: Output, status: Status) -> Result<(), I::Error> {
         trace!("set_status");
-
         self.write_reg(output, status).await
     }
 
     /// Get the current sink/source status and code of an output
-    pub async fn status(&mut self, output: Output) -> Result<Status, Error<E>> {
-        #[cfg(feature = "defmt")]
+    pub async fn status(&mut self, output: Output) -> Result<Status, I::Error> {
         trace!("status");
-
         self.read_reg(output).await.map(|v| v.into())
     }
 
     /// Read a register value.
-    async fn read_reg<R: Into<u8>>(&mut self, reg: R) -> Result<u8, Error<E>> {
-        #[cfg(feature = "defmt")]
+    async fn read_reg<R: Into<u8>>(&mut self, reg: R) -> Result<u8, I::Error> {
         trace!("read_reg");
 
         let mut buf = [0x00];
@@ -141,25 +133,22 @@ where
             .await
             .map_err(Error::I2c)?;
 
-        #[cfg(feature = "defmt")]
         debug!("R @0x{:x}={:x}", reg, buf[0]);
 
         Ok(buf[0])
     }
 
     /// Blindly write a single memory address with a fixed value.
-    async fn write_reg<R, V>(&mut self, reg: R, value: V) -> Result<(), Error<E>>
+    async fn write_reg<R, V>(&mut self, reg: R, value: V) -> Result<(), I::Error>
     where
         R: Into<u8>,
         V: Into<u8>,
     {
-        #[cfg(feature = "defmt")]
         trace!("write_reg");
 
         let reg = reg.into();
         let value = value.into();
 
-        #[cfg(feature = "defmt")]
         debug!("W @0x{:x}={:x}", reg, value);
 
         self.i2c
