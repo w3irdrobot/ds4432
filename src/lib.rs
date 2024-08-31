@@ -26,7 +26,7 @@ use embedded_hal_async::i2c::I2c as AsyncI2c;
 
 /// The DS4432's I2C addresses.
 #[cfg(any(feature = "async", feature = "sync"))]
-const SLAVE_ADDRESS: u8 = 0x90;
+const SLAVE_ADDRESS: u8 = 0x48;
 
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
