@@ -33,8 +33,8 @@ const SLAVE_ADDRESS: u8 = 0x48;
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum Output {
-    One = 0xF8,
-    Two = 0xF9,
+    Zero = 0xF8,
+    One = 0xF9,
 }
 
 impl From<Output> for u8 {
@@ -150,15 +150,15 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
             }
             Status::SinkMircoAmp(current) => {
                 let rfs = match output {
-                    Output::One => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
-                    Output::Two => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
                 };
                 ((current * (rfs as f32)) / 62_312.5) as u8
             }
             Status::SourceMircoAmp(current) => {
                 let rfs = match output {
-                    Output::One => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
-                    Output::Two => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
                 };
                 // ensures MSB is 1
                 ((current * (rfs as f32)) / 62_312.5) as u8 | 0x80
@@ -189,7 +189,7 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
 
         let mut status = buf[0].into();
         match output {
-            Output::One => {
+            Output::Zero => {
                 if let Some(rfs) = self.rfs0_ohm {
                     status = match status {
                         Status::Sink(code) => {
@@ -202,7 +202,7 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
                     }
                 }
             }
-            Output::Two => {
+            Output::One => {
                 if let Some(rfs) = self.rfs1_ohm {
                     status = match status {
                         Status::Sink(code) => {
@@ -269,16 +269,16 @@ mod test {
     }
 
     #[test]
-    fn can_get_output_1_status() {
+    fn can_get_output_0_status() {
         let expectations = [i2c::Transaction::write_read(
             SLAVE_ADDRESS,
-            vec![Output::One as u8],
+            vec![Output::Zero as u8],
             vec![0xAA],
         )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::new(mock);
 
-        let status = ds4432.status(Output::One).unwrap();
+        let status = ds4432.status(Output::Zero).unwrap();
         assert!(matches!(status, Status::Source(42)));
 
         let mut mock = ds4432.release();
@@ -286,32 +286,32 @@ mod test {
     }
 
     #[test]
-    fn can_set_output_2_status() {
+    fn can_set_output_1_status() {
         let expectations = [i2c::Transaction::write(
             SLAVE_ADDRESS,
-            vec![Output::Two as u8, 0x2A],
+            vec![Output::One as u8, 0x2A],
         )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::new(mock);
 
         // just making sure it doesn't error
-        ds4432.set_status(Output::Two, Status::Sink(42)).unwrap();
+        ds4432.set_status(Output::One, Status::Sink(42)).unwrap();
 
         let mut mock = ds4432.release();
         mock.done();
     }
 
     #[test]
-    fn can_get_output_1_status_current() {
+    fn can_get_output_0_status_current() {
         let expectations = [i2c::Transaction::write_read(
             SLAVE_ADDRESS,
-            vec![Output::One as u8],
+            vec![Output::Zero as u8],
             vec![0xAA],
         )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::with_rfs(mock, Some(80_000), None).unwrap();
 
-        let status = ds4432.status(Output::One).unwrap();
+        let status = ds4432.status(Output::Zero).unwrap();
         assert!(matches!(status, Status::SourceMircoAmp(32.71406)));
 
         let mut mock = ds4432.release();
@@ -319,17 +319,17 @@ mod test {
     }
 
     #[test]
-    fn can_set_output_2_status_current() {
+    fn can_set_output_1_status_current() {
         let expectations = [i2c::Transaction::write(
             SLAVE_ADDRESS,
-            vec![Output::Two as u8, 0x2A],
+            vec![Output::One as u8, 0x2A],
         )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::with_rfs(mock, None, Some(80_000)).unwrap();
 
         // just making sure it doesn't error
         ds4432
-            .set_status(Output::Two, Status::SinkMircoAmp(32.71406))
+            .set_status(Output::One, Status::SinkMircoAmp(32.71406))
             .unwrap();
 
         let mut mock = ds4432.release();
