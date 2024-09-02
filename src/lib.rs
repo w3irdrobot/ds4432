@@ -22,10 +22,10 @@ compile_error!("You should probably choose at least one of `sync` and `async` fe
 
 #[cfg(feature = "sync")]
 use embedded_hal::i2c::ErrorType;
-#[cfg(feature = "async")]
-use embedded_hal::i2c::ErrorType as AsyncErrorType;
 #[cfg(feature = "sync")]
 use embedded_hal::i2c::I2c;
+#[cfg(feature = "async")]
+use embedded_hal_async::i2c::ErrorType as AsyncErrorType;
 #[cfg(feature = "async")]
 use embedded_hal_async::i2c::I2c as AsyncI2c;
 
