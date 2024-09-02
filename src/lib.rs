@@ -52,11 +52,11 @@ pub enum Status {
     /// The output sink at the given code
     Sink(u8),
     /// The output sink at the given current value
-    SinkMircoAmp(f32),
+    SinkMicroAmp(f32),
     /// The output source at the given code
     Source(u8),
     /// The output source at the given current value
-    SourceMircoAmp(f32),
+    SourceMicroAmp(f32),
 }
 
 impl Status {
@@ -148,14 +148,14 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
                     code | 0x80
                 }
             }
-            Status::SinkMircoAmp(current) => {
+            Status::SinkMicroAmp(current) => {
                 let rfs = match output {
                     Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
                     Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
                 };
                 ((current * (rfs as f32)) / 62_312.5) as u8
             }
-            Status::SourceMircoAmp(current) => {
+            Status::SourceMicroAmp(current) => {
                 let rfs = match output {
                     Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
                     Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
@@ -193,10 +193,10 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
                 if let Some(rfs) = self.rfs0_ohm {
                     status = match status {
                         Status::Sink(code) => {
-                            Status::SinkMircoAmp(Status::Sink(code).current_ua(rfs).unwrap())
+                            Status::SinkMicroAmp(Status::Sink(code).current_ua(rfs).unwrap())
                         }
                         Status::Source(code) => {
-                            Status::SourceMircoAmp(Status::Source(code).current_ua(rfs).unwrap())
+                            Status::SourceMicroAmp(Status::Source(code).current_ua(rfs).unwrap())
                         }
                         _ => status,
                     }
@@ -206,10 +206,10 @@ impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
                 if let Some(rfs) = self.rfs1_ohm {
                     status = match status {
                         Status::Sink(code) => {
-                            Status::SinkMircoAmp(Status::Sink(code).current_ua(rfs).unwrap())
+                            Status::SinkMicroAmp(Status::Sink(code).current_ua(rfs).unwrap())
                         }
                         Status::Source(code) => {
-                            Status::SourceMircoAmp(Status::Source(code).current_ua(rfs).unwrap())
+                            Status::SourceMicroAmp(Status::Source(code).current_ua(rfs).unwrap())
                         }
                         _ => status,
                     }
@@ -246,8 +246,8 @@ mod test {
         assert_eq!(Status::Disable.code(), Some(0x00));
         assert_eq!(Status::Sink(0).code(), Some(0x00));
         assert_eq!(Status::Source(0).code(), Some(0x00));
-        assert_eq!(Status::SinkMircoAmp(42.0).code(), None);
-        assert_eq!(Status::SourceMircoAmp(42.0).code(), None);
+        assert_eq!(Status::SinkMicroAmp(42.0).code(), None);
+        assert_eq!(Status::SourceMicroAmp(42.0).code(), None);
     }
 
     #[test]
@@ -256,8 +256,8 @@ mod test {
         assert_eq!(Status::Source(42).current_ua(80_000), Some(32.71406));
         assert_eq!(Status::Sink(42).current_ua(80_000), Some(32.71406));
         assert_eq!(Status::Disable.current_ua(1000), Some(0.0));
-        assert_eq!(Status::SourceMircoAmp(42.0).current_ua(80_000), None);
-        assert_eq!(Status::SinkMircoAmp(42.0).current_ua(80_000), None);
+        assert_eq!(Status::SourceMicroAmp(42.0).current_ua(80_000), None);
+        assert_eq!(Status::SinkMicroAmp(42.0).current_ua(80_000), None);
     }
 
     #[test]
@@ -312,7 +312,7 @@ mod test {
         let mut ds4432 = DS4432::with_rfs(mock, Some(80_000), None).unwrap();
 
         let status = ds4432.status(Output::Zero).unwrap();
-        assert!(matches!(status, Status::SourceMircoAmp(32.71406)));
+        assert!(matches!(status, Status::SourceMicroAmp(32.71406)));
 
         let mut mock = ds4432.release();
         mock.done();
@@ -329,7 +329,7 @@ mod test {
 
         // just making sure it doesn't error
         ds4432
-            .set_status(Output::One, Status::SinkMircoAmp(32.71406))
+            .set_status(Output::One, Status::SinkMicroAmp(32.71406))
             .unwrap();
 
         let mut mock = ds4432.release();
