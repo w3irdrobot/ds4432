@@ -118,13 +118,23 @@ pub struct AsyncDS4432<I> {
     async(feature = "async", keep_self)
 )]
 impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
-    /// Create a new DS4432 using the given I2C implementation
+    /// Create a new DS4432 using the given I2C implementation.
+    ///
+    /// Using this constructor doesn't allow the driver to know the Rfs values so only raw DAC code
+    /// are supported in the Status.
     pub fn new(i2c: I) -> Self {
         trace!("new");
         Self::with_rfs(i2c, None, None).unwrap()
     }
 
-    /// Create a new DS4432 using the given I2C implementation and the optinal Rfs values
+    /// Create a new DS4432 using the given I2C implementation and the optinal Rfs values.
+    ///
+    /// If a Rfs value is given for an Output:
+    /// - reading status will automatically convert to microamps value instead of giving the raw DAC code.
+    /// - writing status will allow automatic convertion from microamps value to raw DAC code.
+    ///
+    /// Note: if you want to only deal with raw DAC code, use `new` instead and use Status::current_ua() to
+    /// do manual convertion into microamps.
     pub fn with_rfs(
         i2c: I,
         rfs0_ohm: Option<u32>,

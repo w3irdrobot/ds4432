@@ -4,7 +4,7 @@
 [![Docs][docs-image]][docs-link]
 ![AGPVv3 licensed][license-image]
 
-Platform-agnostic Rust driver for the Maxim DS4432 Dual-Channel, I^2C, 7-Bit Sink/Source Current Digital To Analog (DAC) converter.
+Platform-agnostic Rust driver for the Maxim DS4432 Dual-Channel, I2C, 7-Bit Sink/Source Current Digital To Analog (DAC) converter.
 
 ## Resources
 
@@ -14,6 +14,14 @@ Platform-agnostic Rust driver for the Maxim DS4432 Dual-Channel, I^2C, 7-Bit Sin
 ## License
 
 Distributed under the AGPLv3 License. See [LICENSE.txt](./LICENSE.txt) for more information.
+
+## Features
+
+- `defmt-03` add support for defmt Formatting of public enums and structs.
+- `sync` (default) use `embedded_hal::i2c::I2c` trait to provide a sync driver.
+- `async` use `embedded_hal_async::i2c::I2c` trait to provide an async driver. Both `sync` and `async` can be enable at the same time, but enabling none is pointless.
+- `not-recommended-rfs` allow driver to use not recommended Rfs value for microamps convertions
+
 
 ## Support
 
