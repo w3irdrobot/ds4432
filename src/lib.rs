@@ -17,6 +17,9 @@ pub(crate) mod fmt;
 mod error;
 pub use error::{Error, Result};
 
+#[cfg(not(any(feature = "sync", feature = "async")))]
+compile_error!("You should probably choose at least one of `sync` and `async` features.");
+
 #[cfg(feature = "sync")]
 use embedded_hal::i2c::ErrorType;
 #[cfg(feature = "async")]
