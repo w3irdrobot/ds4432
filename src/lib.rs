@@ -38,6 +38,9 @@ const RECOMMENDED_RFS_MIN: u32 = 40_000;
 #[cfg(not(feature = "not-recommended-rfs"))]
 const RECOMMENDED_RFS_MAX: u32 = 160_000;
 
+const IOUT_UA_MIN: f32 = 50.0;
+const IOUT_UA_MAX: f32 = 200.0;
+
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
@@ -182,6 +185,9 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
                 }
             }
             Status::SinkMicroAmp(current) => {
+                if current < IOUT_UA_MIN || current > IOUT_UA_MAX {
+                    return Err(Error::InvalidIout);
+                }
                 let rfs = match output {
                     Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
                     Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
@@ -189,6 +195,9 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
                 ((current * (rfs as f32)) / 62_312.5) as u8
             }
             Status::SourceMicroAmp(current) => {
+                if current < IOUT_UA_MIN || current > IOUT_UA_MAX {
+                    return Err(Error::InvalidIout);
+                }
                 let rfs = match output {
                     Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
                     Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
