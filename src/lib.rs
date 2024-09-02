@@ -143,16 +143,14 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
         rfs0_ohm: Option<u32>,
         rfs1_ohm: Option<u32>,
     ) -> Result<Self, I::Error> {
-        for rfs_ohm in [rfs0_ohm, rfs1_ohm] {
-            if let Some(rfs) = rfs_ohm {
-                #[cfg(feature = "not-recommended-rfs")]
-                if rfs == 0 {
-                    return Err(Error::InvalidRfs);
-                }
-                #[cfg(not(feature = "not-recommended-rfs"))]
-                if rfs < RECOMMENDED_RFS_MIN || rfs > RECOMMENDED_RFS_MAX {
-                    return Err(Error::InvalidRfs);
-                }
+        for rfs in [rfs0_ohm, rfs1_ohm].into_iter().flatten() {
+            #[cfg(feature = "not-recommended-rfs")]
+            if rfs == 0 {
+                return Err(Error::InvalidRfs);
+            }
+            #[cfg(not(feature = "not-recommended-rfs"))]
+            if !(RECOMMENDED_RFS_MIN..=RECOMMENDED_RFS_MAX).contains(&rfs) {
+                return Err(Error::InvalidRfs);
             }
         }
         Ok(Self {
@@ -185,7 +183,7 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
                 }
             }
             Status::SinkMicroAmp(current) => {
-                if current < IOUT_UA_MIN || current > IOUT_UA_MAX {
+                if !(IOUT_UA_MIN..=IOUT_UA_MAX).contains(&current) {
                     return Err(Error::InvalidIout);
                 }
                 let rfs = match output {
@@ -195,7 +193,7 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
                 ((current * (rfs as f32)) / 62_312.5) as u8
             }
             Status::SourceMicroAmp(current) => {
-                if current < IOUT_UA_MIN || current > IOUT_UA_MAX {
+                if !(IOUT_UA_MIN..=IOUT_UA_MAX).contains(&current) {
                     return Err(Error::InvalidIout);
                 }
                 let rfs = match output {
