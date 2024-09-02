@@ -362,14 +362,14 @@ mod test {
     fn can_set_output_1_status_current() {
         let expectations = [i2c::Transaction::write(
             SLAVE_ADDRESS,
-            vec![Output::One as u8, 0x2A],
+            vec![Output::One as u8, 0x70],
         )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::with_rfs(mock, None, Some(80_000)).unwrap();
 
         // just making sure it doesn't error
         ds4432
-            .set_status(Output::One, Status::SinkMicroAmp(32.71406))
+            .set_status(Output::One, Status::SinkMicroAmp(88.0))
             .unwrap();
 
         let mut mock = ds4432.release();
