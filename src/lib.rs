@@ -17,8 +17,10 @@ pub(crate) mod fmt;
 mod error;
 pub use error::{Error, Result};
 
-#[cfg(any(feature = "async", feature = "sync"))]
+#[cfg(feature = "sync")]
 use embedded_hal::i2c::ErrorType;
+#[cfg(feature = "async")]
+use embedded_hal::i2c::ErrorType as AsyncErrorType;
 #[cfg(feature = "sync")]
 use embedded_hal::i2c::I2c;
 #[cfg(feature = "async")]
@@ -100,10 +102,14 @@ pub struct AsyncDS4432<I> {
 }
 
 #[maybe_async_cfg::maybe(
-    sync(feature = "sync", self = "DS4432", idents(AsyncI2c(sync = "I2c"))),
+    sync(
+        feature = "sync",
+        self = "DS4432",
+        idents(AsyncI2c(sync = "I2c"), AsyncErrorType(sync = "ErrorType"))
+    ),
     async(feature = "async", keep_self)
 )]
-impl<I: AsyncI2c + ErrorType> AsyncDS4432<I> {
+impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
     /// Create a new DS4432 using the given I2C implementation
     pub fn new(i2c: I) -> Self {
         trace!("new");
