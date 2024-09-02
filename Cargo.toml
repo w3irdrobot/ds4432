@@ -22,6 +22,7 @@ maybe-async-cfg = "0.2"
 async = ["dep:embedded-hal-async"]
 default = ["sync"]
 defmt-03 = ["dep:defmt"]
+not-recommended-rfs = []
 sync = ["dep:embedded-hal"]
 
 [dev-dependencies]

@@ -33,6 +33,11 @@ use embedded_hal_async::i2c::I2c as AsyncI2c;
 #[cfg(any(feature = "async", feature = "sync"))]
 const SLAVE_ADDRESS: u8 = 0b1001000; // This is I2C address 0x48
 
+#[cfg(not(feature = "not-recommended-rfs"))]
+const RECOMMENDED_RFS_MIN: u32 = 40_000;
+#[cfg(not(feature = "not-recommended-rfs"))]
+const RECOMMENDED_RFS_MAX: u32 = 160_000;
+
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
@@ -125,8 +130,17 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
         rfs0_ohm: Option<u32>,
         rfs1_ohm: Option<u32>,
     ) -> Result<Self, I::Error> {
-        if rfs0_ohm == Some(0) || rfs1_ohm == Some(0) {
-            return Err(Error::InvalidRfs);
+        for rfs_ohm in [rfs0_ohm, rfs1_ohm] {
+            if let Some(rfs) = rfs_ohm {
+                #[cfg(feature = "not-recommended-rfs")]
+                if rfs == 0 {
+                    return Err(Error::InvalidRfs);
+                }
+                #[cfg(not(feature = "not-recommended-rfs"))]
+                if rfs < RECOMMENDED_RFS_MIN || rfs > RECOMMENDED_RFS_MAX {
+                    return Err(Error::InvalidRfs);
+                }
+            }
         }
         Ok(Self {
             i2c,
