@@ -75,11 +75,11 @@ pub enum Status {
 impl Status {
     /// Return the raw DAC code for a given Status
     /// MicroAmp variants return None because Rfs is unknown to make the conversion.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use ds4432::Status;
-    /// 
+    ///
     /// assert_eq!(Status::Sink(42).code(), Some(0x2A));
     /// assert_eq!(Status::Source(42).code(), Some(0x2A));
     /// assert_eq!(Status::Disable.code(), Some(0x00));
@@ -98,11 +98,11 @@ impl Status {
 
     /// Convert a raw DAC code into its Current value in microamps according to the Rfs value.
     /// MicroAmp variants return None because conversion is pointless.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use ds4432::Status;
-    /// 
+    ///
     /// // example from datasheet
     /// assert_eq!(Status::Source(42).current_ua(80_000), Some(32.71406));
     /// assert_eq!(Status::Sink(42).current_ua(80_000), Some(32.71406));
