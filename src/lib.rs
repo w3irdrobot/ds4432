@@ -73,6 +73,21 @@ pub enum Status {
 }
 
 impl Status {
+    /// Return the raw DAC code for a given Status
+    /// MicroAmp variants return None because Rfs is unknown to make the conversion.
+    /// 
+    /// # Example
+    /// ```
+    /// use ds4432::Status;
+    /// 
+    /// assert_eq!(Status::Sink(42).code(), Some(0x2A));
+    /// assert_eq!(Status::Source(42).code(), Some(0x2A));
+    /// assert_eq!(Status::Disable.code(), Some(0x00));
+    /// assert_eq!(Status::Sink(0).code(), Some(0x00));
+    /// assert_eq!(Status::Source(0).code(), Some(0x00));
+    /// assert_eq!(Status::SinkMicroAmp(42.0).code(), None);
+    /// assert_eq!(Status::SourceMicroAmp(42.0).code(), None);
+    /// ```
     pub fn code(&self) -> Option<u8> {
         match self {
             Self::Sink(c) | Self::Source(c) => Some(*c),
@@ -81,6 +96,20 @@ impl Status {
         }
     }
 
+    /// Convert a raw DAC code into its Current value in microamps according to the Rfs value.
+    /// MicroAmp variants return None because conversion is pointless.
+    /// 
+    /// # Example
+    /// ```
+    /// use ds4432::Status;
+    /// 
+    /// // example from datasheet
+    /// assert_eq!(Status::Source(42).current_ua(80_000), Some(32.71406));
+    /// assert_eq!(Status::Sink(42).current_ua(80_000), Some(32.71406));
+    /// assert_eq!(Status::Disable.current_ua(1000), Some(0.0));
+    /// assert_eq!(Status::SourceMicroAmp(42.0).current_ua(80_000), None);
+    /// assert_eq!(Status::SinkMicroAmp(42.0).current_ua(80_000), None);
+    /// ```
     pub fn current_ua(&self, rfs_ohm: u32) -> Option<f32> {
         self.code()
             .map(|code| ((62_312.5 * code as f64) / (rfs_ohm as f64)) as f32)
@@ -278,27 +307,6 @@ mod test {
     use super::*;
     use embedded_hal_mock::eh1::i2c;
     use std::vec;
-
-    #[test]
-    fn status_to_code_conversion() {
-        assert_eq!(Status::Sink(42).code(), Some(0x2A));
-        assert_eq!(Status::Source(42).code(), Some(0x2A));
-        assert_eq!(Status::Disable.code(), Some(0x00));
-        assert_eq!(Status::Sink(0).code(), Some(0x00));
-        assert_eq!(Status::Source(0).code(), Some(0x00));
-        assert_eq!(Status::SinkMicroAmp(42.0).code(), None);
-        assert_eq!(Status::SourceMicroAmp(42.0).code(), None);
-    }
-
-    #[test]
-    fn code_to_current_ua_conversion() {
-        // example from datasheet
-        assert_eq!(Status::Source(42).current_ua(80_000), Some(32.71406));
-        assert_eq!(Status::Sink(42).current_ua(80_000), Some(32.71406));
-        assert_eq!(Status::Disable.current_ua(1000), Some(0.0));
-        assert_eq!(Status::SourceMicroAmp(42.0).current_ua(80_000), None);
-        assert_eq!(Status::SinkMicroAmp(42.0).current_ua(80_000), None);
-    }
 
     #[test]
     fn u8_to_status_conversion() {
