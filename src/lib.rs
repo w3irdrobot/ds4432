@@ -1,4 +1,3 @@
-#![no_std]
 //! DS4432 driver.
 //!
 //! The DS4432 contains two I2C programmable current
@@ -11,26 +10,44 @@
 //! - [DS4432 product page](https://www.digikey.com/en/products/detail/analog-devices-inc-maxim-integrated/DS4432U-T-R/2062898)
 //! - [DS4432 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS4432.pdf)
 
-#[cfg(feature = "defmt")]
-use defmt::{debug, error, trace, Format};
+#![no_std]
+#![macro_use]
+pub(crate) mod fmt;
 
-#[cfg(all(feature = "blocking", feature = "async"))]
-compile_error!("feature \"blocking\" and feature \"async\" cannot be enabled at the same time");
+mod error;
+pub use error::{Error, Result};
 
-#[cfg(feature = "blocking")]
+#[cfg(not(any(feature = "sync", feature = "async")))]
+compile_error!("You should probably choose at least one of `sync` and `async` features.");
+
+#[cfg(feature = "sync")]
+use embedded_hal::i2c::ErrorType;
+#[cfg(feature = "sync")]
 use embedded_hal::i2c::I2c;
 #[cfg(feature = "async")]
-use embedded_hal_async::i2c::I2c;
+use embedded_hal_async::i2c::ErrorType as AsyncErrorType;
+#[cfg(feature = "async")]
+use embedded_hal_async::i2c::I2c as AsyncI2c;
 
 /// The DS4432's I2C addresses.
-const SLAVE_ADDRESS: u8 = 0x90;
+#[cfg(any(feature = "async", feature = "sync"))]
+const SLAVE_ADDRESS: u8 = 0b1001000; // This is I2C address 0x48
+
+#[cfg(not(feature = "not-recommended-rfs"))]
+const RECOMMENDED_RFS_MIN: u32 = 40_000;
+#[cfg(not(feature = "not-recommended-rfs"))]
+const RECOMMENDED_RFS_MAX: u32 = 160_000;
+
+const IOUT_UA_MIN: f32 = 50.0;
+const IOUT_UA_MAX: f32 = 200.0;
 
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum Output {
-    One = 0xF8,
-    Two = 0xF9,
+    Zero = 0xF8,
+    One = 0xF9,
 }
 
 impl From<Output> for u8 {
@@ -39,44 +56,63 @@ impl From<Output> for u8 {
     }
 }
 
-/// Driver errors.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Error<E> {
-    /// I2C bus error.
-    I2c(E),
-    /// The given level is too high
-    InvalidLevel(u8),
-}
-
 /// The status of an output.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub enum Status {
-    /// The output should sink at the given level
-    Sink(u8),
-    /// The output should source at the given level
-    Source(u8),
     /// The output is completely disabled
     Disable,
+    /// The output sink at the given code
+    Sink(u8),
+    /// The output sink at the given current value
+    SinkMicroAmp(f32),
+    /// The output source at the given code
+    Source(u8),
+    /// The output source at the given current value
+    SourceMicroAmp(f32),
 }
 
 impl Status {
-    pub fn code(&self) -> u8 {
+    /// Return the raw DAC code for a given Status
+    /// MicroAmp variants return None because Rfs is unknown to make the conversion.
+    ///
+    /// # Example
+    /// ```
+    /// use ds4432::Status;
+    ///
+    /// assert_eq!(Status::Sink(42).code(), Some(0x2A));
+    /// assert_eq!(Status::Source(42).code(), Some(0x2A));
+    /// assert_eq!(Status::Disable.code(), Some(0x00));
+    /// assert_eq!(Status::Sink(0).code(), Some(0x00));
+    /// assert_eq!(Status::Source(0).code(), Some(0x00));
+    /// assert_eq!(Status::SinkMicroAmp(42.0).code(), None);
+    /// assert_eq!(Status::SourceMicroAmp(42.0).code(), None);
+    /// ```
+    pub fn code(&self) -> Option<u8> {
         match self {
-            Self::Sink(c) | Self::Source(c) => *c,
-            Self::Disable => 0,
+            Self::Sink(c) | Self::Source(c) => Some(*c),
+            Self::Disable => Some(0),
+            _ => None,
         }
     }
-}
 
-impl From<Status> for u8 {
-    fn from(value: Status) -> Self {
-        match value {
-            Status::Disable | Status::Sink(0) | Status::Source(0) => 0,
-            // ensures MSB is 0
-            Status::Sink(code) => code & 0x7F,
-            // ensures MSB is 1
-            Status::Source(code) => code | 0x80,
-        }
+    /// Convert a raw DAC code into its Current value in microamps according to the Rfs value.
+    /// MicroAmp variants return None because conversion is pointless.
+    ///
+    /// # Example
+    /// ```
+    /// use ds4432::Status;
+    ///
+    /// // example from datasheet
+    /// assert_eq!(Status::Source(42).current_ua(80_000), Some(32.71406));
+    /// assert_eq!(Status::Sink(42).current_ua(80_000), Some(32.71406));
+    /// assert_eq!(Status::Disable.current_ua(1000), Some(0.0));
+    /// assert_eq!(Status::SourceMicroAmp(42.0).current_ua(80_000), None);
+    /// assert_eq!(Status::SinkMicroAmp(42.0).current_ua(80_000), None);
+    /// ```
+    pub fn current_ua(&self, rfs_ohm: u32) -> Option<f32> {
+        self.code()
+            .map(|code| ((62_312.5 * code as f64) / (rfs_ohm as f64)) as f32)
     }
 }
 
@@ -86,6 +122,7 @@ impl From<u8> for Status {
         let code = value & 0x7F;
 
         match (sourcing, code) {
+            (true, 0) => Self::Disable,
             (false, 0) => Self::Disable,
             (true, c) => Self::Source(c),
             (false, c) => Self::Sink(c),
@@ -94,78 +131,161 @@ impl From<u8> for Status {
 }
 
 /// A DS4432 Digital To Analog (DAC) converter on the I2C bus `I`.
-#[maybe_async_cfg::maybe(sync(feature = "blocking", keep_self), async(feature = "async"))]
-pub struct DS4432<I> {
+#[maybe_async_cfg::maybe(
+    sync(feature = "sync", self = "DS4432"),
+    async(feature = "async", keep_self)
+)]
+pub struct AsyncDS4432<I> {
     i2c: I,
+    rfs0_ohm: Option<u32>,
+    rfs1_ohm: Option<u32>,
 }
 
-#[maybe_async_cfg::maybe(sync(feature = "blocking", keep_self), async(feature = "async"))]
-impl<I, E> DS4432<I>
-where
-    I: I2c<Error = E>,
-{
-    /// Create a new DS4432 using the given I2C implementation
-    pub async fn new(i2c: I) -> Self {
-        #[cfg(feature = "defmt")]
+#[maybe_async_cfg::maybe(
+    sync(
+        feature = "sync",
+        self = "DS4432",
+        idents(AsyncI2c(sync = "I2c"), AsyncErrorType(sync = "ErrorType"))
+    ),
+    async(feature = "async", keep_self)
+)]
+impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
+    /// Create a new DS4432 using the given I2C implementation.
+    ///
+    /// Using this constructor doesn't allow the driver to know the Rfs values so only raw DAC code
+    /// are supported in the Status.
+    pub fn new(i2c: I) -> Self {
         trace!("new");
+        Self::with_rfs(i2c, None, None).unwrap()
+    }
 
-        Self { i2c }
+    /// Create a new DS4432 using the given I2C implementation and the optinal Rfs values.
+    ///
+    /// If a Rfs value is given for an Output:
+    /// - reading status will automatically convert to microamps value instead of giving the raw DAC code.
+    /// - writing status will allow automatic convertion from microamps value to raw DAC code.
+    ///
+    /// Note: if you want to only deal with raw DAC code, use `new` instead and use Status::current_ua() to
+    /// do manual convertion into microamps.
+    pub fn with_rfs(
+        i2c: I,
+        rfs0_ohm: Option<u32>,
+        rfs1_ohm: Option<u32>,
+    ) -> Result<Self, I::Error> {
+        for rfs in [rfs0_ohm, rfs1_ohm].into_iter().flatten() {
+            #[cfg(feature = "not-recommended-rfs")]
+            if rfs == 0 {
+                return Err(Error::InvalidRfs);
+            }
+            #[cfg(not(feature = "not-recommended-rfs"))]
+            if !(RECOMMENDED_RFS_MIN..=RECOMMENDED_RFS_MAX).contains(&rfs) {
+                return Err(Error::InvalidRfs);
+            }
+        }
+        Ok(Self {
+            i2c,
+            rfs0_ohm,
+            rfs1_ohm,
+        })
     }
 
     /// Set the current sink/source status and code of an output
-    pub async fn set_status(&mut self, output: Output, status: Status) -> Result<(), Error<E>> {
-        #[cfg(feature = "defmt")]
+    pub async fn set_status(&mut self, output: Output, status: Status) -> Result<(), I::Error> {
         trace!("set_status");
 
-        self.write_reg(output, status).await
-    }
+        let reg = output.into();
+        let value = match status {
+            Status::Disable | Status::Sink(0) | Status::Source(0) => 0,
+            Status::Sink(code) => {
+                if code > 127 {
+                    return Err(Error::InvalidCode(code));
+                } else {
+                    code
+                }
+            }
+            Status::Source(code) => {
+                if code > 127 {
+                    return Err(Error::InvalidCode(code));
+                } else {
+                    // ensures MSB is 1
+                    code | 0x80
+                }
+            }
+            Status::SinkMicroAmp(current) => {
+                if !(IOUT_UA_MIN..=IOUT_UA_MAX).contains(&current) {
+                    return Err(Error::InvalidIout);
+                }
+                let rfs = match output {
+                    Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+                };
+                ((current * (rfs as f32)) / 62_312.5) as u8
+            }
+            Status::SourceMicroAmp(current) => {
+                if !(IOUT_UA_MIN..=IOUT_UA_MAX).contains(&current) {
+                    return Err(Error::InvalidIout);
+                }
+                let rfs = match output {
+                    Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+                    Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+                };
+                // ensures MSB is 1
+                ((current * (rfs as f32)) / 62_312.5) as u8 | 0x80
+            }
+        };
 
-    /// Get the current sink/source status and code of an output
-    pub async fn status(&mut self, output: Output) -> Result<Status, Error<E>> {
-        #[cfg(feature = "defmt")]
-        trace!("status");
-
-        self.read_reg(output).await.map(|v| v.into())
-    }
-
-    /// Read a register value.
-    async fn read_reg<R: Into<u8>>(&mut self, reg: R) -> Result<u8, Error<E>> {
-        #[cfg(feature = "defmt")]
-        trace!("read_reg");
-
-        let mut buf = [0x00];
-        let reg = reg.into();
-
-        self.i2c
-            .write_read(SLAVE_ADDRESS, &[reg], &mut buf)
-            .await
-            .map_err(Error::I2c)?;
-
-        #[cfg(feature = "defmt")]
-        debug!("R @0x{:x}={:x}", reg, buf[0]);
-
-        Ok(buf[0])
-    }
-
-    /// Blindly write a single memory address with a fixed value.
-    async fn write_reg<R, V>(&mut self, reg: R, value: V) -> Result<(), Error<E>>
-    where
-        R: Into<u8>,
-        V: Into<u8>,
-    {
-        #[cfg(feature = "defmt")]
-        trace!("write_reg");
-
-        let reg = reg.into();
-        let value = value.into();
-
-        #[cfg(feature = "defmt")]
         debug!("W @0x{:x}={:x}", reg, value);
 
         self.i2c
             .write(SLAVE_ADDRESS, &[reg, value])
             .await
             .map_err(Error::I2c)
+    }
+
+    /// Get the current sink/source status and code of an output
+    pub async fn status(&mut self, output: Output) -> Result<Status, I::Error> {
+        trace!("status");
+
+        let mut buf = [0x00];
+        let reg = output.into();
+
+        self.i2c
+            .write_read(SLAVE_ADDRESS, &[reg], &mut buf)
+            .await
+            .map_err(Error::I2c)?;
+
+        debug!("R @0x{:x}={:x}", reg, buf[0]);
+
+        let mut status = buf[0].into();
+        match output {
+            Output::Zero => {
+                if let Some(rfs) = self.rfs0_ohm {
+                    status = match status {
+                        Status::Sink(code) => {
+                            Status::SinkMicroAmp(Status::Sink(code).current_ua(rfs).unwrap())
+                        }
+                        Status::Source(code) => {
+                            Status::SourceMicroAmp(Status::Source(code).current_ua(rfs).unwrap())
+                        }
+                        _ => status,
+                    }
+                }
+            }
+            Output::One => {
+                if let Some(rfs) = self.rfs1_ohm {
+                    status = match status {
+                        Status::Sink(code) => {
+                            Status::SinkMicroAmp(Status::Sink(code).current_ua(rfs).unwrap())
+                        }
+                        Status::Source(code) => {
+                            Status::SourceMicroAmp(Status::Source(code).current_ua(rfs).unwrap())
+                        }
+                        _ => status,
+                    }
+                }
+            }
+        }
+        Ok(status)
     }
 
     /// Return the underlying I2C device
@@ -189,12 +309,24 @@ mod test {
     use std::vec;
 
     #[test]
-    fn can_get_output_1_status() {
-        let expectations = [i2c::Transaction::write_read(0x90, vec![0xF8], vec![0xAA])];
+    fn u8_to_status_conversion() {
+        assert_eq!(Status::from(0x2A), Status::Sink(42));
+        assert_eq!(Status::from(0xAA), Status::Source(42));
+        assert_eq!(Status::from(0x00), Status::Disable);
+        assert_eq!(Status::from(0x80), Status::Disable);
+    }
+
+    #[test]
+    fn can_get_output_0_status() {
+        let expectations = [i2c::Transaction::write_read(
+            SLAVE_ADDRESS,
+            vec![Output::Zero as u8],
+            vec![0xAA],
+        )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::new(mock);
 
-        let status = ds4432.status(Output::One).unwrap();
+        let status = ds4432.status(Output::Zero).unwrap();
         assert!(matches!(status, Status::Source(42)));
 
         let mut mock = ds4432.release();
@@ -202,13 +334,51 @@ mod test {
     }
 
     #[test]
-    fn can_set_output_2_status() {
-        let expectations = [i2c::Transaction::write(0x90, vec![0xF9, 0x2A])];
+    fn can_set_output_1_status() {
+        let expectations = [i2c::Transaction::write(
+            SLAVE_ADDRESS,
+            vec![Output::One as u8, 0x2A],
+        )];
         let mock = i2c::Mock::new(&expectations);
         let mut ds4432 = DS4432::new(mock);
 
         // just making sure it doesn't error
-        ds4432.set_status(Output::Two, Status::Sink(42)).unwrap();
+        ds4432.set_status(Output::One, Status::Sink(42)).unwrap();
+
+        let mut mock = ds4432.release();
+        mock.done();
+    }
+
+    #[test]
+    fn can_get_output_0_status_current() {
+        let expectations = [i2c::Transaction::write_read(
+            SLAVE_ADDRESS,
+            vec![Output::Zero as u8],
+            vec![0xAA],
+        )];
+        let mock = i2c::Mock::new(&expectations);
+        let mut ds4432 = DS4432::with_rfs(mock, Some(80_000), None).unwrap();
+
+        let status = ds4432.status(Output::Zero).unwrap();
+        assert!(matches!(status, Status::SourceMicroAmp(32.71406)));
+
+        let mut mock = ds4432.release();
+        mock.done();
+    }
+
+    #[test]
+    fn can_set_output_1_status_current() {
+        let expectations = [i2c::Transaction::write(
+            SLAVE_ADDRESS,
+            vec![Output::One as u8, 0x70],
+        )];
+        let mock = i2c::Mock::new(&expectations);
+        let mut ds4432 = DS4432::with_rfs(mock, None, Some(80_000)).unwrap();
+
+        // just making sure it doesn't error
+        ds4432
+            .set_status(Output::One, Status::SinkMicroAmp(88.0))
+            .unwrap();
 
         let mut mock = ds4432.release();
         mock.done();
