@@ -20,6 +20,7 @@ maybe-async-cfg = "0.2"
 
 [features]
 async = ["dep:embedded-hal-async"]
+core-error = []                    # bump MSRV to 1.81.0
 default = ["sync"]
 defmt-03 = ["dep:defmt"]
 not-recommended-rfs = []
