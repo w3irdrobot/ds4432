@@ -16,3 +16,13 @@ pub enum Error<E> {
     /// Try to set a Current value without giving the Rfs value
     UnknownRfs,
 }
+
+#[cfg(feature = "core-error")]
+impl<E: core::fmt::Debug> core::error::Error for Error<E> {}
+
+#[cfg(feature = "core-error")]
+impl<E: core::fmt::Debug> core::fmt::Display for Error<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}

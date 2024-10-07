@@ -9,7 +9,7 @@ license = " AGPL-3.0-only"
 name = "ds4432"
 repository = "https://github.com/w3irdrobot/ds4432"
 rust-version = "1.71.1"
-version = "0.2.0"
+version = "0.2.1"
 
 [dependencies]
 defmt = { version = "0.3", optional = true }
@@ -20,6 +20,7 @@ maybe-async-cfg = "0.2"
 
 [features]
 async = ["dep:embedded-hal-async"]
+core-error = []                    # bump MSRV to 1.81.0
 default = ["sync"]
 defmt-03 = ["dep:defmt"]
 not-recommended-rfs = []
