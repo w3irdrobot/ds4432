@@ -9,7 +9,7 @@ license = " AGPL-3.0-only"
 name = "ds4432"
 repository = "https://github.com/w3irdrobot/ds4432"
 rust-version = "1.71.1"
-version = "0.2.0"
+version = "0.2.1"
 
 [dependencies]
 defmt = { version = "0.3", optional = true }
