@@ -43,7 +43,7 @@ const IOUT_UA_MAX: f32 = 200.0;
 
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
 pub enum Output {
     Zero = 0xF8,
@@ -58,7 +58,7 @@ impl From<Output> for u8 {
 
 /// The status of an output.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Status {
     /// The output is completely disabled
     Disable,
