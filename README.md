@@ -17,7 +17,7 @@ Distributed under the AGPLv3 License. See [LICENSE.txt](./LICENSE.txt) for more 
 
 ## Features
 
-- `defmt-03` add support for defmt Formatting of public enums and structs.
+- `defmt` add support for defmt Formatting of public enums and structs.
 - `sync` (default) use `embedded_hal::i2c::I2c` trait to provide a sync driver.
 - `async` use `embedded_hal_async::i2c::I2c` trait to provide an async driver. Both `sync` and `async` can be enable at the same time, but enabling none is pointless.
 - `not-recommended-rfs` allow driver to use not recommended Rfs value for microamps convertions
