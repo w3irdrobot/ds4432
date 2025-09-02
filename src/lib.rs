@@ -131,7 +131,7 @@ impl From<u8> for Status {
 }
 
 /// A DS4432 Digital To Analog (DAC) converter on the I2C bus `I`.
-#[maybe_async_cfg::maybe(
+#[maybe_async_cfg2::maybe(
     sync(feature = "sync", self = "DS4432"),
     async(feature = "async", keep_self)
 )]
@@ -141,7 +141,7 @@ pub struct AsyncDS4432<I> {
     rfs1_ohm: Option<u32>,
 }
 
-#[maybe_async_cfg::maybe(
+#[maybe_async_cfg2::maybe(
     sync(
         feature = "sync",
         self = "DS4432",
