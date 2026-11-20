@@ -38,9 +38,6 @@ const RECOMMENDED_RFS_MIN: u32 = 40_000;
 #[cfg(not(feature = "not-recommended-rfs"))]
 const RECOMMENDED_RFS_MAX: u32 = 160_000;
 
-const IOUT_UA_MIN: f32 = 50.0;
-const IOUT_UA_MAX: f32 = 200.0;
-
 /// An output controllable by the DS4432. This device has two.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -189,6 +186,20 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
         })
     }
 
+    /// The DAC code of `current` microamps on `output`, rounded down to a DAC step: from 0 up to
+    /// the full scale of the output's Rfs (code 127, `127 * 62_312.5 / Rfs` µA).
+    fn code(&self, output: Output, current: f32) -> Result<u8, I::Error> {
+        let rfs = match output {
+            Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
+            Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
+        };
+        let code = (current * (rfs as f32)) / 62_312.5;
+        if !(0.0..128.0).contains(&code) {
+            return Err(Error::InvalidIout);
+        }
+        Ok(code as u8)
+    }
+
     /// Set the current sink/source status and code of an output
     pub async fn set_status(&mut self, output: Output, status: Status) -> Result<(), I::Error> {
         trace!("set_status");
@@ -211,27 +222,12 @@ impl<I: AsyncI2c + AsyncErrorType> AsyncDS4432<I> {
                     code | 0x80
                 }
             }
-            Status::SinkMicroAmp(current) => {
-                if !(IOUT_UA_MIN..=IOUT_UA_MAX).contains(&current) {
-                    return Err(Error::InvalidIout);
-                }
-                let rfs = match output {
-                    Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
-                    Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
-                };
-                ((current * (rfs as f32)) / 62_312.5) as u8
-            }
-            Status::SourceMicroAmp(current) => {
-                if !(IOUT_UA_MIN..=IOUT_UA_MAX).contains(&current) {
-                    return Err(Error::InvalidIout);
-                }
-                let rfs = match output {
-                    Output::Zero => self.rfs0_ohm.ok_or(Error::UnknownRfs)?,
-                    Output::One => self.rfs1_ohm.ok_or(Error::UnknownRfs)?,
-                };
+            Status::SinkMicroAmp(current) => self.code(output, current)?,
+            Status::SourceMicroAmp(current) => match self.code(output, current)? {
+                0 => 0,
                 // ensures MSB is 1
-                ((current * (rfs as f32)) / 62_312.5) as u8 | 0x80
-            }
+                code => code | 0x80,
+            },
         };
 
         debug!("W @0x{:x}={:x}", reg, value);
@@ -379,6 +375,49 @@ mod test {
         ds4432
             .set_status(Output::One, Status::SinkMicroAmp(88.0))
             .unwrap();
+
+        let mut mock = ds4432.release();
+        mock.done();
+    }
+
+    #[test]
+    fn can_set_currents_from_zero_to_full_scale() {
+        let expectations = [
+            i2c::Transaction::write(SLAVE_ADDRESS, vec![Output::Zero as u8, 0x00]),
+            i2c::Transaction::write(SLAVE_ADDRESS, vec![Output::Zero as u8, 0x9A]),
+            i2c::Transaction::write(SLAVE_ADDRESS, vec![Output::Zero as u8, 0x7F]),
+        ];
+        let mock = i2c::Mock::new(&expectations);
+        let mut ds4432 = DS4432::with_rfs(mock, Some(80_000), None).unwrap();
+
+        // 0 µA, 20.4 µA (code 26) and the full scale at 80 kΩ, 98.92 µA (code 127)
+        ds4432
+            .set_status(Output::Zero, Status::SourceMicroAmp(0.0))
+            .unwrap();
+        ds4432
+            .set_status(Output::Zero, Status::SourceMicroAmp(20.4))
+            .unwrap();
+        ds4432
+            .set_status(Output::Zero, Status::SinkMicroAmp(98.93))
+            .unwrap();
+
+        let mut mock = ds4432.release();
+        mock.done();
+    }
+
+    #[test]
+    fn rejects_currents_outside_the_full_scale() {
+        let mock = i2c::Mock::new(&[]);
+        let mut ds4432 = DS4432::with_rfs(mock, Some(80_000), None).unwrap();
+
+        assert!(matches!(
+            ds4432.set_status(Output::Zero, Status::SinkMicroAmp(100.0)),
+            Err(Error::InvalidIout)
+        ));
+        assert!(matches!(
+            ds4432.set_status(Output::Zero, Status::SourceMicroAmp(-1.0)),
+            Err(Error::InvalidIout)
+        ));
 
         let mut mock = ds4432.release();
         mock.done();

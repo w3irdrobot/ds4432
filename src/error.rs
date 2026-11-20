@@ -9,7 +9,7 @@ pub enum Error<E> {
     I2c(E),
     /// The given code is too high
     InvalidCode(u8),
-    /// The given Iout is out of range
+    /// The given Iout is negative or above the full scale of the output's Rfs
     InvalidIout,
     /// The given RFS is out of range
     InvalidRfs,
